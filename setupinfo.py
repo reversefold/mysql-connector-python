@@ -46,7 +46,7 @@ with open(version_py, 'rb') as fp:
 command_classes = {}
 
 package_dir = {'': 'lib'}
-name = 'mysql-connector-python'
+name = 'mysql-connector-python-rf'
 version = '{0}.{1}.{2}'.format(*VERSION[0:3])
 
 packages = [
