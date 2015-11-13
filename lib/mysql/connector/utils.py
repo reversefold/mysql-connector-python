@@ -1,5 +1,5 @@
 # MySQL Connector/Python - MySQL driver written in Python.
-# Copyright (c) 2009, 2014, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2009, 2015, Oracle and/or its affiliates. All rights reserved.
 
 # MySQL Connector/Python is licensed under the terms of the GPLv2
 # <http://www.gnu.org/licenses/old-licenses/gpl-2.0.html>, like most
@@ -100,12 +100,12 @@ def int4store(i):
 
 def int8store(i):
     """
-    Takes an unsigned integer (4 bytes) and packs it as string.
+    Takes an unsigned integer (8 bytes) and packs it as string.
 
     Returns string.
     """
     if i < 0 or i > 18446744073709551616:
-        raise ValueError('int4store requires 0 <= i <= 2^64')
+        raise ValueError('int8store requires 0 <= i <= 2^64')
     else:
         return bytearray(struct.pack('<Q', i))
 
@@ -134,6 +134,24 @@ def intstore(i):
         formed_string = int8store
 
     return formed_string(i)
+
+
+def lc_int(i):
+    """
+    Takes an unsigned integer and packs it as bytes,
+    with the information of how much bytes the encoded int takes.
+    """
+    if i < 0 or i > 18446744073709551616:
+        raise ValueError('Requires 0 <= i <= 2^64')
+
+    if i < 251:
+        return bytearray(struct.pack('<B', i))
+    elif i <= 65535:
+        return b'\xfc' + bytearray(struct.pack('<H', i))
+    elif i <= 16777215:
+        return b'\xfd' + bytearray(struct.pack('<I', i)[0:3])
+    else:
+        return b'\xfe' + bytearray(struct.pack('<Q', i))
 
 
 def read_bytes(buf, size):

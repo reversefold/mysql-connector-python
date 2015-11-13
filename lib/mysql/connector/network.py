@@ -1,5 +1,5 @@
 # MySQL Connector/Python - MySQL driver written in Python.
-# Copyright (c) 2012, 2014, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2012, 2015, Oracle and/or its affiliates. All rights reserved.
 
 # MySQL Connector/Python is licensed under the terms of the GPLv2
 # <http://www.gnu.org/licenses/old-licenses/gpl-2.0.html>, like most
@@ -220,10 +220,14 @@ class BaseMySQLSocket(object):
         """Receive packets from the MySQL server"""
         try:
             # Read the header of the MySQL packet, 4 bytes
-            packet = bytearray(4)
-            read = self.sock.recv_into(packet, 4)
-            if read != 4:
-                raise errors.InterfaceError(errno=2013)
+            packet = bytearray(b'')
+            packet_len = 0
+            while packet_len < 4:
+                chunk = self.sock.recv(4 - packet_len)
+                if not chunk:
+                    raise errors.InterfaceError(errno=2013)
+                packet += chunk
+                packet_len = len(packet)
 
             # Save the packet number and payload length
             self._packet_number = packet[3]
@@ -255,12 +259,13 @@ class BaseMySQLSocket(object):
         try:
             # Read the header of the MySQL packet, 4 bytes
             header = bytearray(b'')
-
-            while len(header) < 4:
-                chunk = self.sock.recv(4)
+            header_len = 0
+            while header_len < 4:
+                chunk = self.sock.recv(4 - header_len)
                 if not chunk:
                     raise errors.InterfaceError(errno=2013)
                 header += chunk
+                header_len = len(header)
 
             # Save the packet number and payload length
             self._packet_number = header[3]
@@ -435,7 +440,7 @@ class MySQLTCPSocket(BaseMySQLSocket):
         """Open the TCP/IP connection to the MySQL server
         """
         # Get address information
-        addrinfo = None
+        addrinfo = [None] * 5
         try:
             addrinfos = socket.getaddrinfo(self.server_host,
                                            self.server_port,
@@ -449,10 +454,10 @@ class MySQLTCPSocket(BaseMySQLSocket):
                 elif info[0] == socket.AF_INET:
                     addrinfo = info
                     break
-            if self.force_ipv6 and not addrinfo:
+            if self.force_ipv6 and addrinfo[0] is None:
                 raise errors.InterfaceError(
                     "No IPv6 address found for {0}".format(self.server_host))
-            if not addrinfo:
+            if addrinfo[0] is None:
                 addrinfo = addrinfos[0]
         except IOError as err:
             raise errors.InterfaceError(
