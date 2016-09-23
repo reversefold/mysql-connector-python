@@ -1,11 +1,18 @@
 ==========================
-MySQL Connector/Python 2.1
+MySQL Connector/Python 2.2
 ==========================
 
 MySQL Connector/Python
-Copyright (c) 2009, 2015, Oracle and/or its affiliates. All rights reserved.
+Copyright (c) 2009, 2016, Oracle and/or its affiliates. All rights reserved.
 
 License information can be found in the LICENSE.txt file.
+
+
+Requirements
+============
+
+Python Protobuf (version >= 3.0.0)
+https://developers.google.com/protocol-buffers/docs/downloads
 
 
 Documentation & Examples
@@ -28,7 +35,7 @@ doubt, this particular copy of the software is released
 under the version 2 of the GNU General Public License.
 MySQL Connector/Python is brought to you by Oracle.
 
-Copyright (c) 2011, 2015, Oracle and/or its affiliates. All rights reserved.
+Copyright (c) 2011, 2016, Oracle and/or its affiliates. All rights reserved.
 
 License information can be found in the LICENSE.txt file.
 
