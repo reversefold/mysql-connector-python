@@ -27,10 +27,14 @@
 
 import logging
 import unittest
-
+import sys
 import tests
 import mysqlx
 
+if mysqlx.compat.PY3:
+    from urllib.parse import quote
+else:
+    from urllib import quote
 
 LOGGER = logging.getLogger(tests.LOGGER_NAME)
 
@@ -161,6 +165,51 @@ class MySQLxXSessionTests(tests.MySQLxTests):
         except mysqlx.errors.InterfaceError as err:
             self.assertEqual(4001, err.errno)
 
+    @unittest.skipIf(tests.MYSQL_VERSION < (5, 7, 15), "--mysqlx-socket option tests not available for this MySQL version")
+    def test_mysqlx_socket(self):
+        # Connect with unix socket
+        uri = "mysqlx://{user}:{password}@({socket})".format(
+            user=self.connect_kwargs["user"],
+            password=self.connect_kwargs["password"],
+            socket=self.connect_kwargs["socket"])
+
+        session = mysqlx.get_session(uri)
+
+        conn = mysqlx._get_connection_settings("root:@(/path/to/sock)")
+        self.assertEqual("/path/to/sock", conn["socket"])
+        self.assertEqual("", conn["schema"])
+
+        conn = mysqlx._get_connection_settings("root:@(/path/to/sock)/schema")
+        self.assertEqual("/path/to/sock", conn["socket"])
+        self.assertEqual("schema", conn["schema"])
+
+        conn = mysqlx._get_connection_settings("root:@/path%2Fto%2Fsock")
+        self.assertEqual("/path/to/sock", conn["socket"])
+        self.assertEqual("", conn["schema"])
+
+        conn = mysqlx._get_connection_settings("root:@/path%2Fto%2Fsock/schema")
+        self.assertEqual("/path/to/sock", conn["socket"])
+        self.assertEqual("schema", conn["schema"])
+
+        conn = mysqlx._get_connection_settings("root:@.%2Fpath%2Fto%2Fsock")
+        self.assertEqual("./path/to/sock", conn["socket"])
+        self.assertEqual("", conn["schema"])
+
+        conn = mysqlx._get_connection_settings("root:@.%2Fpath%2Fto%2Fsock"
+                                               "/schema")
+        self.assertEqual("./path/to/sock", conn["socket"])
+        self.assertEqual("schema", conn["schema"])
+
+        conn = mysqlx._get_connection_settings("root:@..%2Fpath%2Fto%2Fsock")
+        self.assertEqual("../path/to/sock", conn["socket"])
+        self.assertEqual("", conn["schema"])
+
+        conn = mysqlx._get_connection_settings("root:@..%2Fpath%2Fto%2Fsock"
+                                               "/schema")
+        self.assertEqual("../path/to/sock", conn["socket"])
+        self.assertEqual("schema", conn["schema"])
+
+
     def test_connection_uri(self):
         uri = ("mysqlx://{user}:{password}@{host}:{port}/{schema}"
                "".format(user=self.connect_kwargs["user"],
@@ -273,6 +322,58 @@ class MySQLxXSessionTests(tests.MySQLxTests):
                 tests.MYSQL_SERVERS[0].start()
                 tests.MYSQL_SERVERS[0].wait_up()
 
+    @unittest.skipIf(sys.version_info < (2, 7, 9), "The support for SSL is "
+                     "not available for Python versions < 2.7.9.")
+    def test_ssl_connection(self):
+        config = {}
+        config.update(self.connect_kwargs)
+
+        # Secure by default
+        session = mysqlx.get_session(config)
+
+        res = mysqlx.statement.SqlStatement(session._connection,
+            "SHOW STATUS LIKE 'Mysqlx_ssl_active'").execute().fetch_all()
+        self.assertEqual("ON", res[0][1])
+
+        res = mysqlx.statement.SqlStatement(session._connection,
+            "SHOW STATUS LIKE 'Mysqlx_ssl_version'").execute().fetch_all()
+        self.assertTrue("TLS" in res[0][1])
+
+        session.close()
+
+        config["ssl-key"] = tests.SSL_KEY
+        self.assertRaises(mysqlx.errors.InterfaceError,
+                          mysqlx.get_session, config)
+
+        # Connection with ssl parameters
+        config["ssl-ca"] = tests.SSL_CA
+        config["ssl-cert"] = tests.SSL_CERT
+
+        session = mysqlx.get_session(config)
+
+        res = mysqlx.statement.SqlStatement(session._connection,
+            "SHOW STATUS LIKE 'Mysqlx_ssl_active'").execute().fetch_all()
+        self.assertEqual("ON", res[0][1])
+
+        res = mysqlx.statement.SqlStatement(session._connection,
+            "SHOW STATUS LIKE 'Mysqlx_ssl_version'").execute().fetch_all()
+        self.assertTrue("TLS" in res[0][1])
+
+        session.close()
+
+        uri = ("mysqlx://{0}:{1}@{2}?ssl-ca={3}&ssl-cert={4}&ssl-key={5}"
+               "".format(config["user"], config["password"], config["host"],
+                         quote(config["ssl-ca"]), quote(config["ssl-cert"]),
+                         quote(config["ssl-key"])))
+        session = mysqlx.get_session(uri)
+
+        uri = ("mysqlx://{0}:{1}@{2}?ssl-ca=({3})&ssl-cert=({4})&ssl-key=({5})"
+               "".format(config["user"], config["password"], config["host"],
+                         config["ssl-ca"], config["ssl-cert"],
+                         config["ssl-key"]))
+        session = mysqlx.get_session(uri)
+
+
 @unittest.skipIf(tests.MYSQL_VERSION < (5, 7, 12), "XPlugin not compatible")
 class MySQLxNodeSessionTests(tests.MySQLxTests):
 
@@ -310,6 +411,16 @@ class MySQLxNodeSessionTests(tests.MySQLxTests):
                 self.assertEqual(res, settings)
             except mysqlx.Error:
                 self.assertEqual(res, None)
+
+    @unittest.skipIf(tests.MYSQL_VERSION < (5, 7, 15), "--mysqlx-socket option tests not available for this MySQL version")
+    def test_mysqlx_socket(self):
+        # Connect with unix socket
+        uri = "mysqlx://{user}:{password}@({socket})".format(
+            user=self.connect_kwargs["user"],
+            password=self.connect_kwargs["password"],
+            socket=self.connect_kwargs["socket"])
+
+        session = mysqlx.get_session(uri)
 
     def test_get_schema(self):
         schema = self.session.get_schema(self.schema_name)
@@ -384,3 +495,54 @@ class MySQLxNodeSessionTests(tests.MySQLxTests):
         self.assertEqual(table.count(), 1)
 
         schema.drop_table(table_name)
+
+    @unittest.skipIf(sys.version_info < (2, 7, 9), "The support for SSL is "
+                     "not available for Python versions < 2.7.9.")
+    def test_ssl_connection(self):
+        config = {}
+        config.update(self.connect_kwargs)
+
+        # Secure by default
+        session = mysqlx.get_node_session(config)
+
+        res = mysqlx.statement.SqlStatement(session._connection,
+            "SHOW STATUS LIKE 'Mysqlx_ssl_active'").execute().fetch_all()
+        self.assertEqual("ON", res[0][1])
+
+        res = mysqlx.statement.SqlStatement(session._connection,
+            "SHOW STATUS LIKE 'Mysqlx_ssl_version'").execute().fetch_all()
+        self.assertTrue("TLS" in res[0][1])
+
+        session.close()
+
+        config["ssl-key"] = tests.SSL_KEY
+        self.assertRaises(mysqlx.errors.InterfaceError,
+                          mysqlx.get_node_session, config)
+
+        # Connection with ssl parameters
+        config["ssl-ca"] = tests.SSL_CA
+        config["ssl-cert"] = tests.SSL_CERT
+
+        session = mysqlx.get_node_session(config)
+
+        res = session.sql("SHOW STATUS LIKE 'Mysqlx_ssl_active'") \
+                     .execute().fetch_all()
+        self.assertEqual("ON", res[0][1])
+
+        res = session.sql("SHOW STATUS LIKE 'Mysqlx_ssl_version'") \
+            .execute().fetch_all()
+        self.assertTrue("TLS" in res[0][1])
+
+        session.close()
+
+        uri = ("mysqlx://{0}:{1}@{2}?ssl-ca={3}&ssl-cert={4}&ssl-key={5}"
+               "".format(config["user"], config["password"], config["host"],
+                         quote(config["ssl-ca"]), quote(config["ssl-cert"]),
+                         quote(config["ssl-key"])))
+        session = mysqlx.get_node_session(uri)
+
+        uri = ("mysqlx://{0}:{1}@{2}?ssl-ca=({3})&ssl-cert=({4})&ssl-key=({5})"
+               "".format(config["user"], config["password"], config["host"],
+                         config["ssl-ca"], config["ssl-cert"],
+                         config["ssl-key"]))
+        session = mysqlx.get_node_session(uri)

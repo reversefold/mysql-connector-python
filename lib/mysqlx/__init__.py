@@ -25,9 +25,11 @@
 
 import re
 
-from .compat import STRING_TYPES, urlparse
+from . import constants
+
+from .compat import STRING_TYPES, urlparse, unquote, parse_qsl
 from .connection import XSession, NodeSession
-from .crud import Schema, Collection, Table
+from .crud import Schema, Collection, Table, View
 from .dbdoc import DbDoc
 from .errors import (Error, Warning, InterfaceError, DatabaseError,
                      NotSupportedError, DataError, IntegrityError,
@@ -39,7 +41,9 @@ from .statement import (Statement, FilterableStatement, SqlStatement,
                         ModifyStatement, SelectStatement, InsertStatement,
                         DeleteStatement, UpdateStatement,
                         CreateCollectionIndexStatement,
-                        DropCollectionIndexStatement)
+                        DropCollectionIndexStatement, CreateViewStatement,
+                        AlterViewStatement, ColumnDef,
+                        GeneratedColumnDef, ForeignKeyDef, Expr)
 
 
 def _parse_address_list(address_list):
@@ -96,21 +100,31 @@ def _parse_connection_uri(uri):
         Returns a dict with parsed values of credentials and address of the
         MySQL server/farm.
     """
-    settings = {}
-
+    settings = {"schema": ""}
     uri = "{0}{1}".format("" if uri.startswith("mysqlx://")
                           else "mysqlx://", uri)
-    parsed = urlparse(uri)
-    if parsed.hostname is None or parsed.username is None \
-       or parsed.password is None:
-        raise InterfaceError("Malformed URI '{0}'".format(uri))
-    settings = {
-        "user": parsed.username,
-        "password": parsed.password,
-        "schema": parsed.path.lstrip("/")
-    }
+    scheme, temp = uri.split("://", 1)
+    userinfo, temp = temp.partition("@")[::2]
+    host, query_str = temp.partition("?")[::2]
 
-    settings.update(_parse_address_list(parsed.netloc.split("@")[-1]))
+    pos = host.rfind("/")
+    if host[pos:].find(")") is -1 and pos > 0:
+        host, settings["schema"] = host.rsplit("/", 1)
+    host = host.strip("()")
+
+    if not host or not userinfo or ":" not in userinfo:
+        raise InterfaceError("Malformed URI '{0}'".format(uri))
+    settings["user"], settings["password"] = userinfo.split(":", 1)
+
+    if host.startswith(("/", "..", ".")):
+        settings["socket"] = unquote(host)
+    elif host.startswith("\\."):
+        raise InterfaceError("Windows Pipe is not supported.")
+    else:
+        settings.update(_parse_address_list(host))
+
+    for opt, val in dict(parse_qsl(query_str, True)).items():
+        settings[opt] = unquote(val.strip("()")) or True
     return settings
 
 def _validate_settings(settings):
@@ -133,7 +147,7 @@ def _validate_settings(settings):
             settings["port"] = int(settings["port"])
         except NameError:
             raise InterfaceError("Invalid port")
-    else:
+    elif "host" in settings:
         settings["port"] = 33060
 
 def _get_connection_settings(*args, **kwargs):
@@ -211,8 +225,11 @@ __all__ = [
     # mysqlx.connection
     "XSession", "NodeSession", "get_session", "get_node_session",
 
+    # mysqlx.constants
+    "constants",
+
     # mysqlx.crud
-    "Schema", "Collection", "Table",
+    "Schema", "Collection", "Table", "View",
 
     # mysqlx.errors
     "Error", "Warning", "InterfaceError", "DatabaseError", "NotSupportedError",
@@ -228,4 +245,6 @@ __all__ = [
     "FindStatement", "AddStatement", "RemoveStatement", "ModifyStatement",
     "SelectStatement", "InsertStatement", "DeleteStatement", "UpdateStatement",
     "CreateCollectionIndexStatement", "DropCollectionIndexStatement",
+    "CreateViewStatement", "AlterViewStatement",
+    "ColumnDef", "GeneratedColumnDef", "ForeignKeyDef", "Expr",
 ]

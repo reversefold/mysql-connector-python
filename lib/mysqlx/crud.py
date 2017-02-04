@@ -28,7 +28,8 @@ from .statement import (FindStatement, AddStatement, RemoveStatement,
                         ModifyStatement, SelectStatement, InsertStatement,
                         DeleteStatement, UpdateStatement,
                         CreateCollectionIndexStatement,
-                        DropCollectionIndexStatement)
+                        DropCollectionIndexStatement, CreateViewStatement,
+                        AlterViewStatement, CreateTableStatement)
 
 
 _COUNT_VIEWS_QUERY = ("SELECT COUNT(*) FROM information_schema.views "
@@ -141,7 +142,10 @@ class Schema(DatabaseObject):
         for row in rows:
             if row.get_string("type") != "COLLECTION":
                 continue
-            collection = Collection(self, row.get_string("name"))
+            try:
+                collection = Collection(self, row.get_string("TABLE_NAME"))
+            except ValueError:
+                collection = Collection(self, row.get_string("name"))
             collections.append(collection)
         return collections
 
@@ -166,7 +170,10 @@ class Schema(DatabaseObject):
         object_types = ("TABLE", "VIEW",)
         for row in rows:
             if row.get_string("type") in object_types:
-                table = Table(self, row.get_string("name"))
+                try:
+                    table = Table(self, row.get_string("TABLE_NAME"))
+                except ValueError:
+                    table = Table(self, row.get_string("name"))
                 tables.append(table)
         return tables
 
@@ -181,6 +188,18 @@ class Schema(DatabaseObject):
             if not table.exists_in_database():
                 raise ProgrammingError("Table does not exist")
         return table
+
+    def get_view(self, name, check_existence=False):
+        """Returns the view of the given name for this schema.
+
+        Returns:
+            mysqlx.View: View object.
+        """
+        view = View(self, name)
+        if check_existence:
+            if not view.exists_in_database():
+                raise ProgrammingError("View does not exist")
+        return view
 
     def get_collection(self, name, check_existence=False):
         """Returns the collection of the given name for this schema.
@@ -211,11 +230,19 @@ class Schema(DatabaseObject):
         """
         table = Table(self, name)
         if table.is_view():
-            self._connection.execute_nonquery(
-                "sql", _DROP_VIEW_QUERY.format(self._name, name), False)
+            self.drop_view(name)
         else:
             self._connection.execute_nonquery(
                 "sql", _DROP_TABLE_QUERY.format(self._name, name), False)
+
+    def drop_view(self, name):
+        """Drops a view.
+
+        Args:
+            name (str): The name of the view to be dropped.
+        """
+        self._connection.execute_nonquery(
+            "sql", _DROP_VIEW_QUERY.format(self._name, name), False)
 
     def create_collection(self, name, reuse=False):
         """Creates in the current schema a new collection with the specified
@@ -225,9 +252,14 @@ class Schema(DatabaseObject):
             name (str): The name of the collection.
             reuse (bool): `True` to reuse an existing collection.
 
+        Returns:
+            mysqlx.Collection: Collection object.
+
         Raises:
             ProgrammingError: If ``reuse`` is False and collection exists.
         """
+        if not name:
+            raise ProgrammingError("Collection name is invalid")
         collection = Collection(self, name)
         if not collection.exists_in_database():
             self._connection.execute_nonquery("xplugin", "create_collection",
@@ -235,6 +267,43 @@ class Schema(DatabaseObject):
         elif not reuse:
             raise ProgrammingError("Collection already exists")
         return collection
+
+    def create_view(self, name, replace=False):
+        """Creates in the current schema a new view with the specified name
+        and retrieves an object representing the new view created.
+
+        Args:
+            name (string): The name of the view.
+            replace (Optional[bool]): `True` to add replace.
+
+        Returns:
+            mysqlx.View: View object.
+        """
+        view = View(self, name)
+        return view.get_create_statement(replace)
+
+    def alter_view(self, name):
+        """Alters a view in the current schema with the specified name and
+        retrieves an object representing the view.
+
+        Args:
+            name (string): The name of the view.
+
+        Returns:
+            mysqlx.View: View object.
+        """
+        view = View(self, name)
+        return view.get_alter_statement()
+
+    def create_table(self, name, reuse=False):
+        if not name:
+            raise ProgrammingError("Table name is invalid")
+        table = Table(self, name)
+        if not table.exists_in_database():
+            return CreateTableStatement(self, name)
+        elif not reuse:
+            raise ProgrammingError("Table already exists")
+        return table
 
 
 class Collection(DatabaseObject):
@@ -425,3 +494,45 @@ class Table(DatabaseObject):
         """
         sql = _COUNT_VIEWS_QUERY.format(self._schema.get_name(), self._name)
         return self._connection.execute_sql_scalar(sql) == 1
+
+
+class View(Table):
+    """Represents a database view on a schema.
+
+    Provides a mechanism for creating, alter and drop views.
+
+    Args:
+        schema (mysqlx.Schema): The Schema object.
+        name (str): The table name.
+    """
+
+    def __init__(self, schema, name):
+        super(View, self).__init__(schema, name)
+
+    def exists_in_database(self):
+        """Verifies if this object exists in the database.
+
+        Returns:
+            bool: `True` if object exists in database.
+        """
+        sql = _COUNT_VIEWS_QUERY.format(self._schema.name, self._name)
+        return self._connection.execute_sql_scalar(sql) == 1
+
+    def get_create_statement(self, replace=False):
+        """Creates a new :class:`mysqlx.CreateViewStatement` object.
+
+        Args:
+            replace (Optional[bool]): `True` to add replace.
+
+        Returns:
+            mysqlx.CreateViewStatement: CreateViewStatement object.
+        """
+        return CreateViewStatement(self, replace)
+
+    def get_alter_statement(self):
+        """Creates a new :class:`mysqlx.AlterViewStatement` object.
+
+        Returns:
+            mysqlx.AlterViewStatement: AlterViewStatement object.
+        """
+        return AlterViewStatement(self)
